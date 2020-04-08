@@ -1,5 +1,5 @@
 ---
-title: "Covid & Kinsa Exploratory Data Analysis"
+title: "Covid & Kinsa Preliminary EDA"
 author: "Thomas Zhao"
 date: "04/07/2020"
 output: 
@@ -20,14 +20,23 @@ library(DataComputing)
 ```
 
 ## Guiding Question
-Can we make predictions or find useful correlations in Covid data using [Kinsa's](https://www.kinsahealth.co/enterprise/kinsa-insights/) health data?
+Can we make predictions and/or find useful correlations in Covid data using [Kinsa's](https://www.kinsahealth.co/enterprise/kinsa-insights/) health data?
 
 
 ### Data source #1
+Who: New York Times
+
+What: data on coronavirus cases and deaths in the U.S.
+
+Where: the U.S.
+
+When: 01/21/2020 to Present
+
+Why: The Times maintain this dataset in an attempt to provide a complete record of the ongoing outbreak
 
 The New York Times maintains a handy [Github repo](https://github.com/nytimes/covid-19-data) of the most recent data regarding Covid-19. Within are two csv files which contain data on Covid-19 cases at the county-level & state-level. We'll be focusing on county-level data (where each case represents a Covid cases in a county on a given date) since our other data source is county-level as well. 
 
-Below, we load the most recent nytimes data directly from their Github. As of 4/7/2020, we have 38197 rows in the data frame.
+Below, we load the most recent nytimes data directly from their Github.
 
 ```{r}
 library("RCurl")
@@ -38,10 +47,20 @@ Covid <- read.csv(text = x, header=TRUE)
 head(Covid)
 nrow(Covid)
 ```
-
+ As of 4/7/2020, we have 38197 rows in the data frame.
 
 
 ### Data source #2
+Who: [Kinsa](https://www.kinsahealth.co/)
+
+What: data on influenza-like incidents (ili) aggregated from Kinsa's smart thermometers
+
+Where: the U.S.
+
+When: 02/16/2020 to Present
+
+Why: To track (and perhaps predict) the spread of contagious illnesses
+
 
 Our second source of data is Kinsa's public health API, which aggregates data from Kinsa's [smart thermometers](https://www.kinsahealth.co/products/#buynow). The API base url is "https://static.kinsahealth.com". Details on how the data was extracted from the API can be found in the Python file in this repository.
 
@@ -69,16 +88,20 @@ KinsaData <- KinsaData %>%
 ```
 
 
-Let's see how Covid cases in New York City evolved:
+Let's see how Covid cases in New York City evolved to get a feel for the data:
 
 ```{r}
 cases_NYC <- Covid %>%
   filter(state == "New York") %>%
   filter(county == "New York City")
 
+summary(cases_NYC)
+```
+```{r}
 ggplot(data=cases_NYC,aes(x=date,y=cases))+geom_line() 
 ```
-This is consistent with the news so far... let's see what the Kinsa data looks like for New York County.
+
+This is consistent with the news so far... let's see what the Kinsa data looks like for New York County aka Manhattan (they don't have New York City as a whole unfortunately).
 ```{r}
 Kinsa_NY <- KinsaData %>% 
   filter(region_id == 36061) #this is the fips code for New York County
@@ -87,7 +110,7 @@ ggplot(data=Kinsa_NY, aes(x = date, y = observed_ili)) +
         geom_line() + 
         xlim(mdy("3/1/2020"), mdy("4/6/2020"))
 ```
-A side-by-side view will allow us to compare the two better
+Observed ili peaks around Mar 18, but this doesn't tell us too much. A side-by-side view will allow us to compare the two better
 ```{r}
 require(gridExtra)
 plot1 <- ggplot(data=cases_NYC,aes(x=date,y=cases))+geom_line() 
@@ -106,4 +129,6 @@ plot2 <- ggplot(data=Kinsa_NY, aes(x = date, y = anomaly_diff)) +
 grid.arrange(plot1, plot2, ncol=1)
 
 ```
-The anomaly_diff seems to peak around the start of the Covid cases being recorded, so there is clearly some sort of correlation going on here. For the future, further statistical analysis will be needed, as well as a country-wide approach to determine the total "effectiveness" of Kinsa's data in predicting Covid. NYC could be an outlier after all.
+The anomaly_diff seems to peak around the start of the Covid cases being recorded, so there is clearly some sort of correlation going on here. 
+
+Further statistical analysis will be needed, as well as a country-wide approach to determine the total "effectiveness" of Kinsa's data in predicting Covid. Looking at the cross-correlation between observed_ili and Covid cases would tell us a lot about the predictive capability of Kinsa's data.  
