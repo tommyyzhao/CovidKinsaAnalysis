@@ -1,0 +1,168 @@
+---
+title: "Covid & Kinsa Exploratory Data Analysis"
+author: "Thomas Zhao"
+date: "04/07/2020"
+output: 
+    html_notebook:
+    fig_height: 6
+    fig_width: 10
+---
+
+
+## Guiding Question
+Can we make useful predictions of Covid data using [Kinsa's](https://www.kinsahealth.co/enterprise/kinsa-insights/) health data?
+
+### Clean up environment and load packages
+```{r}
+# clean up the RStudio environment 
+rm(list = ls())
+```
+
+```{r, echo=FALSE, results='hide'}
+# load all packages used
+library(dplyr)
+library(mosaic)
+library(leaflet)
+library(tidyverse)
+library(lubridate)
+library(DataComputing)
+```
+
+### Data Intake
+
+Loading the most recent nytimes data from Github
+
+```{r}
+library("RCurl")
+
+x <- getURL("https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv")
+Covid <- read.csv(text = x, header=TRUE)
+```
+
+Loading Kinsa data from our csv
+```{r}
+KinsaData <- read.csv("kinsa_county_data.csv")
+```
+
+
+### Inspecting our data
+```{r}
+head(Covid)
+head(KinsaData)
+```
+
+
+
+### Cleaning the data
+We'll need to rename the duplicate column names, and then rename the rest of the columns (after dropping the first row)
+```{r}
+names(Japan)[c(3,7)] <- c("type", "grossMW")
+
+Japan <-
+  Japan %>%
+  filter(row_number() > 1) %>%
+  rename(name = Name, 
+         reactor = `UnitNo.`,
+         model = Reactor,
+         status = Status, 
+         netMW = `Capacity in MW`,
+         construction = `Construction start`,
+         operation = `Commercial operation`, 
+         closure = Closure)
+
+head(Japan)
+```
+
+We'll then analyze the type of the variables and determine if they are appropriate.
+```{r}
+str(Japan)
+```
+We see everything is represented as charactes. Net and gross MW should really be numeric, while the dates should be converted into the date format.
+
+```{r}
+Japan_Cleaned <- Japan %>%
+              mutate(netMW = as.numeric(netMW), grossMW = as.numeric(grossMW), 
+                     construction = dmy(construction), operation = dmy(operation), closure = dmy(closure))
+
+str(Japan_Cleaned)
+```
+
+###Data exploration
+Lets examine how date of construction factors into net generation capacity:
+```{r}
+ggplot(data=Japan_Cleaned, aes(x=construction,y=netMW)) + 
+        geom_point() + 
+        aes(colour=type) + 
+        ggtitle("Date of Construction vs Net Generation Capacity")
+```
+From the plot we can tell that nuclear reactors in Japan are getting progressively more powerful as time goes on. The biggest competition is between boiling water reactors and pressured water reactors, though BWRs generally dominate. There's also a general trend that reactors will have netMW around multiples of 250, 500, 100, etc. 
+
+## Same analysis with China data
+
+We find China to be the 10th element in tableList:
+```{r}
+China <- tableList[[10]]
+head(China)
+```
+
+We do the same data cleaning steps with China as with Japan
+```{r}
+names(China)[c(3,7)] <- c("type", "grossMW")
+
+China <-
+  China %>%
+  filter(row_number() > 1) %>%
+  rename(name = Name, 
+         reactor = `UnitNo.`,
+         model = Reactor,
+         status = Status, 
+         netMW = `Capacity in MW`,
+         construction = `Construction start`,
+         operation = `Commercial operation`, 
+         closure = Closure)
+
+China_Cleaned <- China %>%
+              mutate(netMW = as.numeric(netMW), grossMW = as.numeric(grossMW), 
+                     construction = dmy(construction), operation = dmy(operation), closure = dmy(closure))
+
+head(China_Cleaned)
+str(China_Cleaned)
+```
+
+###Appending the two tables
+
+Now that we have China and Japan's data, we can combine them. Before we do that, we first need to specify the country in each table.
+```{r}
+China_Cleaned <- China_Cleaned %>% mutate(country = "China")
+Japan_Cleaned <- Japan_Cleaned %>% mutate(country = "Japan")
+```
+
+Then we bind the two dataframes by row
+```{r}
+Combined <- bind_rows(China_Cleaned, Japan_Cleaned)
+
+head(Combined)
+```
+
+##More data analysis
+We need to clarify the reactor names, so we'll append reactor number to each name. We'll also drop any rows of reactors that haven't been constructed. Lastly we'll filter for Japan.
+```{r}
+Combined <- Combined %>%
+              mutate(name = paste(name, reactor))
+
+#function to only keep rows with no N/A on a given column.
+completeFun <- function(data, desiredCols) {
+  completeVec <- complete.cases(data[, desiredCols])
+  return(data[completeVec, ])
+}
+
+Combined_Cleaned = completeFun(Combined, "construction") %>% filter(country == "Japan")
+```
+
+Then we generate the plot
+```{r}
+ggplot(data = Combined_Cleaned, aes(x = construction, y = name)) + 
+  geom_segment(aes(x = construction, y = name, xend = operation, yend = name, color = type), size=2) + 
+  geom_point(aes(x = closure, y = name, shape = status, color = type))
+```
+The plot is a bit squished here so you'll need to adjust your screen size to read it clearly. That being said, we can see that three of the Fukushima plants were rendered inoperable around 2011 due to the disaster. Construction times don't seem to be to drastic in general, besides that one FBR plant which seemed to take nearly a decade.
