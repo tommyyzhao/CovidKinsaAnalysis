@@ -28,11 +28,12 @@ for state in states[1:]:
     r = requests.get(url = URL)
     try:
         data = r.json()
+        df = pd.DataFrame(data['data'], columns = data['columns'])
+        kinsa_df = kinsa_df.append(df)
     except:
         print("{} data unavailable".format(state))
         continue
-    df = pd.DataFrame(data['data'], columns = data['columns'])
-    kinsa_df.append(df)
+    
     
 kinsa_df.to_csv('kinsa_county.csv', index=False)
 print("Done")
