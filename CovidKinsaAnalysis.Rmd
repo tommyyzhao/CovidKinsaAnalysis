@@ -1,0 +1,202 @@
+---
+title: "Covid & Kinsa Analysis"
+author: "Thomas Zhao"
+date: "04/24/2020"
+output: 
+    html_notebook:
+    fig_height: 6
+    fig_width: 10
+---
+```{r, echo=FALSE, results='hide'}
+# clean up the RStudio environment 
+rm(list = ls())
+# load all packages used
+library(dplyr)
+library(mosaic)
+library(leaflet)
+library(tidyverse)
+library(lubridate)
+library(DataComputing)
+```
+
+## Guiding Question
+Can we make predictions and/or find useful correlations in Covid data using [Kinsa's](https://www.kinsahealth.co/enterprise/kinsa-insights/) health data?
+
+
+### Data source #1
+Who: New York Times
+
+What: data on coronavirus cases and deaths in the U.S.
+
+Where: the U.S.
+
+When: 01/21/2020 to Present
+
+Why: The Times maintain this dataset in an attempt to provide a complete record of the ongoing outbreak
+
+The New York Times maintains a handy [Github repo](https://github.com/nytimes/covid-19-data) of the most recent data regarding Covid-19. Within are two csv files which contain data on Covid-19 cases at the county-level & state-level. We'll be focusing on county-level data (where each case represents a Covid cases in a county on a given date) since our other data source is county-level as well. 
+
+Below, we load the most recent nytimes data directly from their Github.
+
+```{r}
+library("RCurl")
+
+x <- getURL("https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv")
+Covid <- read.csv(text = x, header=TRUE)
+
+head(Covid)
+str(Covid)
+nrow(Covid)
+```
+As of 4/26/2020, we have 89772 cases in the data frame, where each case is an observation of the # of Covid cases on a given day in a county. Interestingly, there are apparently 55 "states" in this dataset according to the 'state' factor from the str() function. Let's examine this before moving on.
+```{r}
+levels(Covid$state)
+```
+ In addition to the 50 states, we see that this dataset also includes 4 territories + D.C. 
+
+
+### Data source #2
+Who: [Kinsa](https://www.kinsahealth.co/)
+
+What: data on influenza-like incidents (ili) aggregated from Kinsa's smart thermometers
+
+Where: the U.S.
+
+When: 02/16/2020 to Present
+
+Why: To track (and possibly predict) the spread of contagious illnesses
+
+
+Our second source of data is Kinsa's public health API, which aggregates data from Kinsa's [smart thermometers](https://www.kinsahealth.co/products/#buynow). The API base url is "https://static.kinsahealth.com". Details on how the data was extracted from the API can be found in the Python file in this repository.
+
+Let's have a look at the Kinsa data
+```{r}
+KinsaData <- read.csv("kinsa_county.csv")
+
+head(KinsaData)
+str(KinsaData)
+nrow(KinsaData)
+```
+Just like the Covid data, each case represents observations in a county on a given data. In this case, the observation is "observed_ili," which is the observed influenza-like illness (ili) rate which Kinsa aggregates from all its thermometers. Kinsa also provides other useful variables, such as forecast_expected, which is the expected (historical) ili rate in that county, and anomaly_diff, which is the difference between the observed_ili and forecast_expected. We will be focusing on anomaly_diff and observed_ili mainly.
+
+For more info on the details of these variables, see here: https://content.kinsahealth.com/covid-detection-technical-approach
+
+Note that we have significantly more cases in Kinsa data than Covid. We will have to filter for only counties affected by Covid later.
+
+##Preliminary EDA
+First we need to reformat some of the data to have proper data types. Then we prepare for a join to eliminate Kinsa data in counties unaffected by Covid. 
+```{r}
+Covid <- Covid %>%
+  mutate(date = ymd(date))
+
+KinsaData <- KinsaData %>%
+  mutate(date = ymd(date)) %>%
+  select(region_id, region_name, date, observed_ili, anomaly_diff)
+
+CovidKinsa <- Covid %>%
+  left_join(KinsaData, by = c("fips" = "region_id", "date" = "date"))
+
+head(CovidKinsa)
+```
+Note that Kinsa data starts after 2/16/2020, so some NAs are expected.
+
+To get a feel for the data, let's compare Covid cases in two highly affected cities, Seattle (King County) and New York City:
+
+```{r}
+cases_NYC_Seattle <- CovidKinsa %>%
+  filter(state == "New York" | state == "Washington") %>%
+  filter(county == "New York City" | county == "King")
+
+ggplot(data = cases_NYC_Seattle, aes(x = date, y = cases, group=county)) + geom_line(aes(color=county)) + geom_point(aes(color=county), size=1) +
+scale_x_date(breaks = cases_NYC_Seattle$date[seq(1, length(cases_NYC_Seattle$date), by = 8)]) + theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+Wow, cases in NYC really took off in Mid-March, making Seattle's curve look almost flat!
+
+This is consistent with the news so far. Now let's examine the Kinsa data for New York County aka Manhattan (Kinsa only includes county level data) in relation to Covid cases.
+```{r}
+#Note: For NYC's Kinsa data, we don't use the joined dataset because New York City is a unique case in the NYtimes dataset (NYC is really made up of several counties, causing the county-level join by region_id to fail). 
+Kinsa_NYC_Seattle <- KinsaData %>% 
+  filter(region_id == 36061 | region_id == 53033) #Instead we use New York County (the first region_id) to best represent NYC
+
+
+#We also normalize the Covid data to look at a percentage of population, via an ifelse() transformation
+cases_NYC_Seattle <- cases_NYC_Seattle %>%
+  #King County has around 2.3 million residents, versus NYC's 8.3 million
+  mutate(pop_adjusted_cases = ifelse(county == "King", cases/2252782 * 100, cases/8336817 * 100))
+
+
+require(gridExtra)
+plot1 <- ggplot(data=cases_NYC_Seattle, aes(x = date, y = pop_adjusted_cases, group=county)) + geom_line(aes(color=county)) + 
+        xlim(mdy("3/1/2020"), mdy("4/22/2020"))
+plot2 <- ggplot(data=Kinsa_NYC_Seattle, aes(x = date, y = observed_ili, group=region_name)) + 
+        geom_line(aes(color=region_name)) + 
+        xlim(mdy("3/1/2020"), mdy("4/22/2020"))
+grid.arrange(plot1, plot2, ncol=1)
+```
+This looks promising; we see that observed_ili peaks right before when the Covid cases start being registered. The peak for Seattle is before New York's, which makes sense as Seattle was one of the earlier cities to have an outbreak. 
+
+Perhaps observed_ili can be an effective predictor of outbreak, but let's also take a look at the distribution of instances where anomaly_diff is not N/A (meaning Kinsa has detected an anomalous rate of influenza-like activity).
+
+First we define a function to help us make anomaly_diff more plot-able. 
+
+```{r}
+#This function iterates through a vector, replacing zeroes with NA (to avoid plotting them) and the rest to a given constant (we are only interested in the presence of an anomaly, and the constant lets us adjust the height on the plot)
+constant_or_NA <- function(vec, constant) {
+    for (i in c(1:length(vec))) {
+      if (is.na(vec[i]) | vec[i] == 0) {
+        vec[i] <- NA
+      } else {
+        vec[i] <- constant
+      }
+    }
+  
+  return(vec)
+}
+
+```
+
+Then we overlay dots over days with anomalous activity.
+```{r}
+Kinsa_NYC <- Kinsa_NYC_Seattle %>% 
+  filter(region_id == 36061 & date > mdy("2/28/2020") & date < mdy("4/21/2020")) #only getting dates where we have Covid data
+
+Kinsa_Seattle <- Kinsa_NYC_Seattle %>% 
+  filter(region_id == 53033 & date > mdy("2/28/2020") & date < mdy("4/21/2020"))
+
+Kinsa_Seattle <- Kinsa_Seattle[complete.cases(Kinsa_Seattle), ] #Seattle data had some duplicate rows with NA, so we get rid of them. Doesn't affect the visualizations though.
+
+Kinsa_NYC$anomaly_diff <- constant_or_NA(Kinsa_NYC$anomaly_diff, 0.1)
+Kinsa_Seattle$anomaly_diff <- constant_or_NA(Kinsa_Seattle$anomaly_diff, 0.05)
+
+ggplot(data = cases_NYC_Seattle, aes(x = date, y = pop_adjusted_cases)) + 
+        geom_line(aes(color = county)) +
+        geom_point(data = Kinsa_NYC, aes(x = date, y = anomaly_diff, color=region_name)) + 
+        geom_point(data = Kinsa_Seattle, aes(x = date, y = anomaly_diff, color=region_name)) + 
+        scale_color_hue(name = "County", labels = c("King County Cases", "King County Anomalies", "NYC Cases", "NYC Anomalies"))
+
+```
+Compared with Seattle, New York has a much longer period of anomalous activity, which makes sense given true extent of the outbreak in NYC. In either case, there is substantial anomalous activity in the days leading up to the "explosion" in Covid cases.  
+  
+
+###Some Statistical Analysis
+
+We now turn our attention to Seattle, which was one of the first places to be affected by Covid-19, and is a bit easier to work with data-wise since the city isn't split into multiple counties like NYC.
+
+
+```{r}
+View(Kinsa_Seattle) #confirming the data looks good
+```
+
+We want to know if observed_ili has any sort of predictive power regarding Covid-19 cases. To do this, we will run the cross correlation function (ccf) on the two time series 'cases' and 'observed_ili' from 02/28/2020 to 4/21/2020.
+
+Extracting the relevant time series
+```{r}
+kinsa  <- SeattleKinsa$observed_ili[13:51]
+cases <- SeattleCases$cases[0:39]
+```
+
+```{r}
+ccf(kinsa, cases, plot = TRUE)
+ccf(kinsa, cases, plot = FALSE)
+```
+
