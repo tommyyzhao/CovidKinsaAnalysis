@@ -83,7 +83,7 @@ For more info on the details of these variables, see here: https://content.kinsa
 
 Note that we have significantly more cases in Kinsa data than Covid. We will have to filter for only counties affected by Covid later.
 
-##Preliminary EDA
+##EDA
 First we need to reformat some of the data to have proper data types. Then we prepare for a join to eliminate Kinsa data in counties unaffected by Covid. 
 ```{r}
 Covid <- Covid %>%
@@ -98,9 +98,17 @@ CovidKinsa <- Covid %>%
 
 head(CovidKinsa)
 ```
-Note that Kinsa data starts after 2/16/2020, so some NAs are expected.
+Note that Kinsa data starts after 2/16/2020, so some NAs are expected. Let's find out which counties have been affected as of 4-22-2020 most so we know where to focus.
+```{r}
+CovidKinsa %>%
+  filter(date == mdy("4-22-2020")) %>%
+  mutate(covid_rank = rank(cases)) %>%
+  arrange(desc(covid_rank)) %>%
+  head(10)
+```
+Counties in New York take up nearly half of the top 10!
 
-To get a feel for the data, let's compare Covid cases in two highly affected cities, Seattle (King County) and New York City:
+To get a feel for the data, let's compare Covid cases in New York City, a highly affected city, and Seattle (King County) one of the earliest cities to get Covid:
 
 ```{r}
 cases_NYC_Seattle <- CovidKinsa %>%
@@ -158,10 +166,10 @@ constant_or_NA <- function(vec, constant) {
 Then we overlay dots over days with anomalous activity.
 ```{r}
 Kinsa_NYC <- Kinsa_NYC_Seattle %>% 
-  filter(region_id == 36061 & date > mdy("2/28/2020") & date < mdy("4/21/2020")) #only getting dates where we have Covid data
+  filter(region_id == 36061 & date >= mdy("2/28/2020") & date <= mdy("4/21/2020")) #only getting dates where we have Covid data
 
 Kinsa_Seattle <- Kinsa_NYC_Seattle %>% 
-  filter(region_id == 53033 & date > mdy("2/28/2020") & date < mdy("4/21/2020"))
+  filter(region_id == 53033 & date >= mdy("2/28/2020") & date <= mdy("4/21/2020"))
 
 Kinsa_Seattle <- Kinsa_Seattle[complete.cases(Kinsa_Seattle), ] #Seattle data had some duplicate rows with NA, so we get rid of them. Doesn't affect the visualizations though.
 
@@ -191,12 +199,19 @@ We want to know if observed_ili has any sort of predictive power regarding Covid
 
 Extracting the relevant time series
 ```{r}
-kinsa  <- SeattleKinsa$observed_ili[13:51]
-cases <- SeattleCases$cases[0:39]
+kinsa  <- Kinsa_Seattle$observed_ili
+
+Cases_Seattle <- cases_NYC_Seattle %>%
+                    filter(county == "King")
+Cases_Seattle <- Cases_Seattle[complete.cases(Cases_Seattle), ] 
+
+cases <- Cases_Seattle$cases[0:54]
 ```
 
 ```{r}
-ccf(kinsa, cases, plot = TRUE)
+ccf(kinsa, cases, plot = TRUE) #run this in the console to get a non-cutoff version of the graph
 ccf(kinsa, cases, plot = FALSE)
 ```
+At a glance, we see that negative lag generally has stronger correlations than positive lag. Within a 10-day lag or shorter, observed_ili has a fairly strong negative correlation with Covid cases. Generally, this tells us that observed_ili declines a few days before Covid cases increase. To make sense of this, it's helpful to think of observed_ili as a leading indicator for sicknesses in general (not just Covid). It might take days after someone takes their temperature with a Kinsa thermometer to be officially diagnosed with an illness, which would reflect the lag in the data. 
 
+However, it remains an open question why observed influenza-like incidences consistently decline after the initial outbreak, despite the continuing rise in Covid cases. In NYC for example, cases have risen dramatically, yet observed_ili continues to decline for some reason. Perhaps people who are already infected stop taking their temperature (with Kinsa) after being diagnosed?
